@@ -1,32 +1,27 @@
 import mongoose from "mongoose";
 
-const ClaimSchema = new mongoose.Schema({
-  claimText: {
-    type: String,
-    required: true
+const { Schema } = mongoose;
+
+const ClaimSchema = new Schema(
+  {
+    claim_id: {
+      type: String,
+      required: true,
+      index: true,
+    },
+
+    claim_text: {
+      type: String,
+      required: true,
+    },
+
+    normalized_claim: {
+      type: String,
+      required: true,
+      index: true,
+    },
   },
+  { _id: false },
+);
 
-  verdict: {
-    type: String,
-    enum: ["true", "false", "misleading", "unverified"]
-  },
-
-  source: {
-    type: String
-  },
-
-  factCheckURL: {
-    type: String
-  },
-
-  credibilityScore: {
-    type: Number
-  },
-
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
-});
-
-export default mongoose.model("Claim", ClaimSchema);
+export default ClaimSchema;
