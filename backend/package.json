@@ -22,12 +22,14 @@
     "caseless": "^0.12.0",
     "cheerio": "^0.22.0",
     "combined-stream": "^1.0.8",
+    "compromise": "^14.15.0",
     "content-disposition": "^1.0.1",
     "content-type": "^1.0.5",
     "cookie": "^0.7.2",
     "cookie-signature": "^1.2.2",
     "core-util-is": "^1.0.2",
     "cors": "^2.8.6",
+    "crypto": "^1.0.1",
     "css-select": "^1.2.0",
     "css-what": "^2.1.3",
     "dashdash": "^1.14.1",
@@ -176,5 +178,4 @@
   "author": "",
   "license": "ISC",
   "type": "module"
-  
 }
