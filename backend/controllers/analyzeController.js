@@ -7,12 +7,12 @@ import { extractNewsText } from "../services/dataExtraction.js";
 import { extractArticleStructure } from "../services/nlpExtraction.js";
 import { extractClaims } from "../services/claimExtraction.js";
 
-import { updateFakeClaim } from "../services/fakeClaimDetector.js";
-import { reasonAboutClaim } from "../services/claimReasoner.js";
-
 import { detectInputType } from "../utils/detectInputType.js";
 import { normalizeClaim } from "../utils/normalizeClaim.js";
 import { generateClaimId } from "../utils/generateClaimId.js";
+
+import { updateFakeClaim } from "../services/fakeClaimDetector.js";
+import { reasonAboutClaim } from "../services/claimReasoner.js";
 
 export const analyzeArticle = async (req, res) => {
   const { text, body } = req.body;
@@ -90,11 +90,17 @@ export const analyzeArticle = async (req, res) => {
         },
 
         entities: {
-          people: (structure?.people || []).map((p) => p.name || p),
-          organizations: (structure?.organizations || []).map(
-            (o) => o.name || o,
+          people: (structure?.people || []).map((p) =>
+            typeof p === "string" ? p : p.name,
           ),
-          locations: (structure?.locations || []).map((l) => l.name || l),
+
+          organizations: (structure?.organizations || []).map((o) =>
+            typeof o === "string" ? o : o.name,
+          ),
+
+          locations: (structure?.locations || []).map((l) =>
+            typeof l === "string" ? l : l.name,
+          ),
         },
 
         keywords: structure?.keywords || [],
@@ -114,6 +120,7 @@ export const analyzeArticle = async (req, res) => {
     const extractedClaims = await extractClaims(fullArticleText);
 
     let processedClaims = [];
+    let claimAnalyses = [];
 
     let verdict = "unverified";
     let credibilityScore = 50;
@@ -130,46 +137,14 @@ export const analyzeArticle = async (req, res) => {
 
       let existingClaim = await Claim.findOne({ claim_id });
 
-      let factCheckResult = null;
-      let claimVerdict = "unverified";
-      let source = null;
-      let factURL = null;
-      let score = 50;
-
       /*
-      If claim not in DB → check fact API
+      FactCheck API
       */
 
-      if (!existingClaim) {
-        factCheckResult = await searchFactCheck(claimText);
-
-        if (factCheckResult?.claims?.length) {
-          const review = factCheckResult.claims[0].claimReview[0];
-
-          claimVerdict = review.textualRating.toLowerCase();
-          source = review.publisher.name;
-          factURL = review.url;
-
-          score = claimVerdict === "false" ? 10 : 80;
-
-          verdict = claimVerdict;
-          explanation = source;
-          credibilityScore = score;
-        }
-
-        existingClaim = await Claim.create({
-          claim_id,
-          claimText: claimText,
-          normalizedClaim,
-          verdict: claimVerdict,
-          source,
-          factCheckURL: factURL,
-          credibilityScore: score,
-        });
-      }
+      const factCheckResult = await searchFactCheck(claimText);
 
       /*
-      FakeClaim propagation tracking
+      FakeClaim propagation intelligence
       */
 
       const fakeClaimData = await updateFakeClaim({
@@ -178,11 +153,10 @@ export const analyzeArticle = async (req, res) => {
         normalized_claim: normalizedClaim,
         topic: extractedArticle.topic,
         keywords: extractedArticle.keywords,
-        verdict: claimVerdict,
       });
 
       /*
-      Claim reasoning engine
+      AI reasoning
       */
 
       const reasoningResult = await reasonAboutClaim({
@@ -191,13 +165,42 @@ export const analyzeArticle = async (req, res) => {
         fakeClaimData,
       });
 
+      const claimVerdict = reasoningResult.verdict;
+      const score = reasoningResult.credibilityScore;
+      const reasoning = reasoningResult.reasoning;
+
+      /*
+      Save claim if not exists
+      */
+
+      if (!existingClaim) {
+        existingClaim = await Claim.create({
+          claim_id,
+          claimText: claimText,
+          normalizedClaim,
+          verdict: claimVerdict,
+          credibilityScore: score,
+          source:
+            factCheckResult?.claims?.[0]?.claimReview?.[0]?.publisher?.name ||
+            null,
+          factCheckURL:
+            factCheckResult?.claims?.[0]?.claimReview?.[0]?.url || null,
+        });
+      }
+
       processedClaims.push({
         claim_id,
         claim_text: claimText,
         normalized_claim: normalizedClaim,
-        verdict: reasoningResult.verdict,
-        credibilityScore: reasoningResult.credibilityScore,
-        reasoning: reasoningResult.reasoning,
+      });
+
+      claimAnalyses.push({
+        claim_id,
+        claim_text: claimText,
+        normalized_claim: normalizedClaim,
+        verdict: claimVerdict,
+        credibilityScore: score,
+        reasoning,
       });
     }
 
@@ -206,8 +209,23 @@ export const analyzeArticle = async (req, res) => {
     */
 
     extractedArticle.claims = processedClaims;
-
     await extractedArticle.save();
+
+    /*
+    Compute overall article score
+    */
+
+    const scores = claimAnalyses.map((c) => c.credibilityScore);
+
+    if (scores.length) {
+      credibilityScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+      if (credibilityScore > 75) verdict = "likely_true";
+      else if (credibilityScore < 30) verdict = "likely_false";
+      else verdict = "mixed";
+    }
+
+    explanation = "Verdict computed from claim-level verification";
 
     /*
     Save Article Analysis
@@ -218,13 +236,13 @@ export const analyzeArticle = async (req, res) => {
 
       extractedClaims: extractedClaims,
 
+      claimAnalyses,
+
       credibilityScore,
 
       verdict,
 
       explanation,
-
-      claimAnalyses: processedClaims,
     });
 
     res.json({
