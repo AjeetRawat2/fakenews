@@ -73,13 +73,9 @@ export const analyzeArticle = async (req, res) => {
     if (!extractedArticle) {
       extractedArticle = await ExtractedArticle.create({
         article_id,
-
         url: inputType === "url" ? text : null,
-
         title: structure?.title || title,
-
         author: null,
-
         publish_date: null,
 
         content: {
@@ -90,17 +86,9 @@ export const analyzeArticle = async (req, res) => {
         },
 
         entities: {
-          people: (structure?.people || []).map((p) =>
-            typeof p === "string" ? p : p.name,
-          ),
-
-          organizations: (structure?.organizations || []).map((o) =>
-            typeof o === "string" ? o : o.name,
-          ),
-
-          locations: (structure?.locations || []).map((l) =>
-            typeof l === "string" ? l : l.name,
-          ),
+          people: structure?.people || [],
+          organizations: structure?.organizations || [],
+          locations: structure?.locations || [],
         },
 
         keywords: structure?.keywords || [],
@@ -132,19 +120,49 @@ export const analyzeArticle = async (req, res) => {
 
     for (const claimText of extractedClaims) {
       const normalizedClaim = normalizeClaim(claimText);
-
       const claim_id = generateClaimId(normalizedClaim);
 
       let existingClaim = await Claim.findOne({ claim_id });
 
+      let claimVerdict = "unverified";
+      let source = null;
+      let factURL = null;
+      let score = 50;
+
       /*
-      FactCheck API
+      If claim not in DB → check fact API
       */
 
       const factCheckResult = await searchFactCheck(claimText);
 
+      if (!existingClaim) {
+        if (factCheckResult?.claims?.length) {
+          const review = factCheckResult.claims[0].claimReview[0];
+
+          claimVerdict = review.textualRating.toLowerCase();
+          source = review.publisher.name;
+          factURL = review.url;
+
+          score = claimVerdict === "false" ? 10 : 80;
+
+          verdict = claimVerdict;
+          explanation = source;
+          credibilityScore = score;
+        }
+
+        existingClaim = await Claim.create({
+          claim_id,
+          claimText: claimText,
+          normalizedClaim,
+          verdict: claimVerdict,
+          source,
+          factCheckURL: factURL,
+          credibilityScore: score,
+        });
+      }
+
       /*
-      FakeClaim propagation intelligence
+      FakeClaim Intelligence Layer
       */
 
       const fakeClaimData = await updateFakeClaim({
@@ -153,10 +171,11 @@ export const analyzeArticle = async (req, res) => {
         normalized_claim: normalizedClaim,
         topic: extractedArticle.topic,
         keywords: extractedArticle.keywords,
+        verdict: claimVerdict,
       });
 
       /*
-      AI reasoning
+      Claim reasoning layer
       */
 
       const reasoningResult = await reasonAboutClaim({
@@ -165,42 +184,21 @@ export const analyzeArticle = async (req, res) => {
         fakeClaimData,
       });
 
-      const claimVerdict = reasoningResult.verdict;
-      const score = reasoningResult.credibilityScore;
-      const reasoning = reasoningResult.reasoning;
-
-      /*
-      Save claim if not exists
-      */
-
-      if (!existingClaim) {
-        existingClaim = await Claim.create({
-          claim_id,
-          claimText: claimText,
-          normalizedClaim,
-          verdict: claimVerdict,
-          credibilityScore: score,
-          source:
-            factCheckResult?.claims?.[0]?.claimReview?.[0]?.publisher?.name ||
-            null,
-          factCheckURL:
-            factCheckResult?.claims?.[0]?.claimReview?.[0]?.url || null,
-        });
-      }
+      claimAnalyses.push({
+        claim_id,
+        claim_text: claimText,
+        normalized_claim: normalizedClaim,
+        verdict: reasoningResult.verdict,
+        credibilityScore: reasoningResult.credibilityScore,
+        reasoning: reasoningResult.reasoning,
+        severity: fakeClaimData?.severity || null,
+      });
 
       processedClaims.push({
         claim_id,
         claim_text: claimText,
         normalized_claim: normalizedClaim,
-      });
-
-      claimAnalyses.push({
-        claim_id,
-        claim_text: claimText,
-        normalized_claim: normalizedClaim,
-        verdict: claimVerdict,
-        credibilityScore: score,
-        reasoning,
+        severity: fakeClaimData?.severity || null,
       });
     }
 
@@ -209,23 +207,8 @@ export const analyzeArticle = async (req, res) => {
     */
 
     extractedArticle.claims = processedClaims;
+
     await extractedArticle.save();
-
-    /*
-    Compute overall article score
-    */
-
-    const scores = claimAnalyses.map((c) => c.credibilityScore);
-
-    if (scores.length) {
-      credibilityScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-
-      if (credibilityScore > 75) verdict = "likely_true";
-      else if (credibilityScore < 30) verdict = "likely_false";
-      else verdict = "mixed";
-    }
-
-    explanation = "Verdict computed from claim-level verification";
 
     /*
     Save Article Analysis
@@ -233,15 +216,10 @@ export const analyzeArticle = async (req, res) => {
 
     const articleAnalysis = await ArticleAnalysis.create({
       url: inputType === "url" ? text : null,
-
-      extractedClaims: extractedClaims,
-
+      extractedClaims,
       claimAnalyses,
-
       credibilityScore,
-
       verdict,
-
       explanation,
     });
 
