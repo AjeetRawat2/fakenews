@@ -89,15 +89,24 @@ const ExtractedArticleSchema = new Schema({
     default: [],
   },
 
-  claims: {
-    type: [String],
-    default: [],
-  },
+  claims: [
+    {
+      claim_id: String,
+      claim_text: String,
+      normalized_claim: String,
+    },
+  ],
 
   createdAt: {
     type: Date,
     default: Date.now,
   },
 });
+
+ExtractedArticleSchema.index({ "entities.locations": 1 });
+ExtractedArticleSchema.index({ "entities.organizations": 1 });
+ExtractedArticleSchema.index({ "topic.category": 1 });
+ExtractedArticleSchema.index({ keywords: 1 });
+ExtractedArticleSchema.index({ createdAt: -1 });
 
 export default mongoose.model("ExtractedArticle", ExtractedArticleSchema);
