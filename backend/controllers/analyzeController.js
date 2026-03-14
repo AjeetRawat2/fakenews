@@ -14,6 +14,51 @@ import { generateClaimId } from "../utils/generateClaimId.js";
 import { updateFakeClaim } from "../services/fakeClaimDetector.js";
 import { reasonAboutClaim } from "../services/claimReasoner.js";
 
+/*
+Aggregate internal severity scores into
+a frontend-friendly risk score
+*/
+
+const aggregateSeverity = (severity) => {
+  if (!severity) return null;
+
+  const score = severity.final_risk_score;
+
+  let level = "low";
+
+  if (score >= 75) level = "critical";
+  else if (score >= 60) level = "high";
+  else if (score >= 40) level = "medium";
+
+  return {
+    score,
+    level,
+  };
+};
+
+/*
+Aggregate article risk from all claims
+*/
+
+const aggregateArticleRisk = (claimAnalyses) => {
+  const scores = claimAnalyses.map((c) => c.risk?.score).filter(Boolean);
+
+  if (!scores.length) return null;
+
+  const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+  let level = "low";
+
+  if (avgScore >= 75) level = "critical";
+  else if (avgScore >= 60) level = "high";
+  else if (avgScore >= 40) level = "medium";
+
+  return {
+    score: Math.round(avgScore),
+    level,
+  };
+};
+
 export const analyzeArticle = async (req, res) => {
   const { text, body } = req.body;
 
@@ -23,10 +68,6 @@ export const analyzeArticle = async (req, res) => {
         message: "Input text is required",
       });
     }
-
-    /*
-    Detect input type
-    */
 
     const inputType = detectInputType(text);
 
@@ -129,10 +170,6 @@ export const analyzeArticle = async (req, res) => {
       let factURL = null;
       let score = 50;
 
-      /*
-      If claim not in DB → check fact API
-      */
-
       const factCheckResult = await searchFactCheck(claimText);
 
       if (!existingClaim) {
@@ -175,7 +212,7 @@ export const analyzeArticle = async (req, res) => {
       });
 
       /*
-      Claim reasoning layer
+      Reasoning Layer
       */
 
       const reasoningResult = await reasonAboutClaim({
@@ -190,15 +227,14 @@ export const analyzeArticle = async (req, res) => {
         normalized_claim: normalizedClaim,
         verdict: reasoningResult.verdict,
         credibilityScore: reasoningResult.credibilityScore,
+        risk: aggregateSeverity(fakeClaimData?.severity),
         reasoning: reasoningResult.reasoning,
-        severity: fakeClaimData?.severity || null,
       });
 
       processedClaims.push({
         claim_id,
         claim_text: claimText,
         normalized_claim: normalizedClaim,
-        severity: fakeClaimData?.severity || null,
       });
     }
 
@@ -211,6 +247,12 @@ export const analyzeArticle = async (req, res) => {
     await extractedArticle.save();
 
     /*
+    Calculate article risk
+    */
+
+    const articleRisk = aggregateArticleRisk(claimAnalyses);
+
+    /*
     Save Article Analysis
     */
 
@@ -221,11 +263,13 @@ export const analyzeArticle = async (req, res) => {
       credibilityScore,
       verdict,
       explanation,
+      risk: articleRisk,
     });
 
     res.json({
       extractedArticle,
       articleAnalysis,
+      risk: articleRisk,
     });
   } catch (error) {
     console.error(error);
