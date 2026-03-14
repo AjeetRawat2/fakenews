@@ -85,6 +85,11 @@ const FakeClaimSchema = new Schema(
         default: 0,
       },
 
+      harm_score: {
+        type: Number,
+        default: 0,
+      },
+
       final_risk_score: {
         type: Number,
         default: 0,

@@ -1,20 +1,13 @@
 import axios from "axios";
 
-/*
-Search Wikipedia and return summary evidence
-*/
+const WIKI_HEADERS = {
+  "User-Agent": "FakeNewsDetector/1.0 (hackathon project)",
+};
 
 export const searchWikipediaEvidence = async (claim) => {
   try {
     /*
-    Use first 6 words of claim as search query
-    (short queries work better)
-    */
-
-    const query = claim.split(" ").slice(0, 6).join(" ");
-
-    /*
-    Step 1: Search Wikipedia
+    Step 1: Search Wikipedia for the best matching page
     */
 
     const searchResponse = await axios.get(
@@ -23,39 +16,43 @@ export const searchWikipediaEvidence = async (claim) => {
         params: {
           action: "query",
           list: "search",
-          srsearch: query,
+          srsearch: claim,
           format: "json",
         },
+        headers: WIKI_HEADERS,
       },
     );
 
-    const results = searchResponse.data?.query?.search;
+    const searchResults = searchResponse.data?.query?.search;
 
-    if (!results || results.length === 0) {
+    if (!searchResults || searchResults.length === 0) {
       return null;
     }
 
-    const pageTitle = results[0].title;
+    /*
+    Step 2: Get the top page title
+    */
+
+    const pageTitle = searchResults[0].title;
 
     /*
-    Step 2: Get page summary
+    Step 3: Fetch summary of the page
     */
 
     const summaryResponse = await axios.get(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
-        pageTitle,
-      )}`,
+      "https://en.wikipedia.org/api/rest_v1/page/summary/" +
+        encodeURIComponent(pageTitle),
+      {
+        headers: WIKI_HEADERS,
+      },
     );
 
-    const summary = summaryResponse.data?.extract;
-
-    if (!summary) {
-      return null;
-    }
+    const data = summaryResponse.data;
 
     return {
-      title: pageTitle,
-      summary: summary,
+      title: data.title,
+      summary: data.extract,
+      url: data.content_urls?.desktop?.page,
     };
   } catch (error) {
     console.error("Wikipedia search error:", error.message);
