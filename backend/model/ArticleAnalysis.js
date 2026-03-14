@@ -1,28 +1,87 @@
 import mongoose from "mongoose";
 
-const ArticleSchema = new mongoose.Schema({
+const { Schema } = mongoose;
 
-  url: String,
+const ArticleAnalysisSchema = new Schema(
+  {
+    url: {
+      type: String,
+      default: null,
+    },
 
-  title: String,
+    /*
+    Claims extracted from article
+    */
 
-  extractedClaims: [
-    {
-      type: String
-    }
-  ],
+    extractedClaims: {
+      type: [String],
+      default: [],
+    },
 
-  credibilityScore: Number,
+    /*
+    Detailed claim reasoning results
+    */
 
-  verdict: String,
+    claimAnalyses: [
+      {
+        claim_id: String,
 
-  explanation: String,
+        claim_text: String,
 
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+        normalized_claim: String,
 
-});
+        verdict: {
+          type: String,
+          default: "unverified",
+        },
 
-export default mongoose.model("ArticleAnalysis", ArticleSchema);
+        credibilityScore: {
+          type: Number,
+          default: 50,
+        },
+
+        reasoning: {
+          type: [String],
+          default: [],
+        },
+      },
+    ],
+
+    /*
+    Overall article score
+    */
+
+    credibilityScore: {
+      type: Number,
+      default: 50,
+    },
+
+    verdict: {
+      type: String,
+      default: "unverified",
+    },
+
+    explanation: {
+      type: String,
+      default: null,
+    },
+
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    timestamps: true,
+  },
+);
+
+/*
+Indexes for faster queries
+*/
+
+ArticleAnalysisSchema.index({ credibilityScore: -1 });
+ArticleAnalysisSchema.index({ verdict: 1 });
+ArticleAnalysisSchema.index({ createdAt: -1 });
+
+export default mongoose.model("ArticleAnalysis", ArticleAnalysisSchema);
