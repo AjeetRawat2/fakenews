@@ -13,8 +13,10 @@ export const PIPELINE_STAGES = [
 
 export const VERDICT_TYPES = [
   "true",
+  "likely_true",
   "false",
   "misleading",
   "unverified",
   "partially_true",
+  "miscaptioned",
 ];
